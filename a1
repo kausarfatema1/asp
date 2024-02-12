@@ -1,0 +1,431 @@
+#define _XOPEN_SOURCE 500
+#include <stdio.h>
+#include <ftw.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <string.h>
+#include <stdint.h>
+#include <libgen.h>
+#include <limits.h>
+#include <fcntl.h>
+#include <stddef.h>
+
+#include <stdbool.h>
+
+#define MAX_FILES 1000
+
+
+const char *filetosearch;
+const char  *targetdirectory;
+const char *options;
+const char *extension;
+
+const char *filetocopy;
+char **files = NULL;
+int files_count = 0;
+int counter =0;
+
+bool file_exist(const char *filename) {
+    for (int i = 0; i < files_count; ++i) {
+        
+
+       
+        if (strcmp(basename(files[i]), basename(filename)) == 0) {
+            
+           
+            return true;
+            
+        }
+    }
+    return false;
+}
+
+
+
+
+
+void addtotar() {
+    if (chdir(targetdirectory) != 0) {
+        perror("chdir");
+        exit(EXIT_FAILURE);
+    }
+
+    
+    char tar_filename[]="a1.tar"; 
+    
+
+    // Create the tar command with the specified tar filename
+    size_t Unix_cmd_length = strlen("tar -cf ") + strlen(tar_filename) + 1; // +1 for null terminator
+
+    for (int i = 0; i < files_count; ++i) {
+        Unix_cmd_length += strlen(files[i]) + 1; // +1 for space separator
+    }
+
+    // Allocate memory dynamically for the command
+    char *Unix_cmd = (char *)malloc(Unix_cmd_length);
+    if (Unix_cmd == NULL) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
+    // Construct the initial part of the command
+    strcpy(Unix_cmd, "tar -cf ");
+    strcat(Unix_cmd, tar_filename);
+
+    // Append each file name to the command
+    for (int i = 0; i < files_count; ++i) {
+        strcat(Unix_cmd, " ");
+        strcat(Unix_cmd, files[i]);
+    }
+    // Execute the tar command
+    int ret = system(Unix_cmd);
+    if (ret != 0) {
+        printf("Error creating tar file\n");
+        exit(EXIT_FAILURE);
+    }
+    printf("\nSuccessfull creating tar file in: %s\n",targetdirectory);
+}
+
+
+
+// file_to_move has the absolute path of the file that has to be moved
+
+// filetosearch is the name of the file that has to be moved
+
+int move_file(char * file_to_move){
+
+char target_directory_fulpath[PATH_MAX];
+
+//Command to find the absolute path of target directory if relative path is given
+realpath(targetdirectory,target_directory_fulpath);
+
+
+//finding the total length of the path
+size_t final_target_length = strlen(target_directory_fulpath) + strlen(filetosearch) + 2; 
+   
+   
+//dynamical allocation of memory
+char *final_target = (char *)malloc(final_target_length);
+
+
+// Concatinating target_directory_fulpath and filetosearch to have a final path where the file will be moved
+
+   //ex: target_directory_fulpath="/home/kausar/test",  filetosearch="hello.txt"
+   // after concatinating: /home/kausar/test/hello.txt path will be created 
+
+snprintf(final_target, final_target_length, "%s/%s", target_directory_fulpath, filetosearch);
+
+
+
+
+//moving the file
+if(rename(file_to_move,final_target)==0){
+printf("\nFile moved Successfully to  %s\n",target_directory_fulpath);
+return 1;
+
+}
+else{
+
+printf("Error Moving the file");
+return 0;
+}
+
+}
+
+int copy_file(char * absolute_path){
+// Variables to store paths
+char target_directory_fulpath[PATH_MAX];
+
+
+// Get the absolute path of the target directory
+realpath(targetdirectory,target_directory_fulpath);
+char final_target[PATH_MAX];
+
+    // Concatenate the target directory path and the file name to get the final target path
+    snprintf(final_target, sizeof(final_target), "%s/%s", target_directory_fulpath, filetosearch);
+
+ // Open the source file for reading
+int file1 = open(absolute_path, O_RDONLY);
+    if (file1 == -1) {
+        perror("open source");
+        return 0; // Return 0 to indicate failure
+    }
+
+
+
+// Open (or create) the target file for writing
+int file2 = open(final_target, O_CREAT|O_RDWR, 0777);
+    if (file2 == -1) {
+        perror("open target");
+        close(file1);
+        return 0; // Return 0 to indicate failure
+    }
+
+    char buffer[1024];
+    int bytesRead, bytesWritten;
+
+    while ((bytesRead = read(file1, buffer, sizeof(buffer))) > 0) {
+        bytesWritten = write(file2, buffer, bytesRead);
+        
+    }
+
+    close(file1);
+    close(file2);
+
+    if (bytesRead == -1) {
+        perror("read");
+        return 0; // Return 0 to indicate failure
+    }
+
+    return 1;
+
+
+}
+
+
+int  find_file(const char *fpath, const struct stat *sb,int tflag, struct FTW *ftwbuf){
+
+// Extract filename from file path
+char *filename = basename(fpath);
+
+// check if file to search is specified or not
+// this will help in differentiation on which function to call
+// for example to create a tar filetosearch is not speccified 
+if(filetosearch!=NULL){
+    // If the current file matches the file to search
+    if (strcmp(filetosearch,filename)==0){
+        counter++;
+    // Get the absolute path of the file
+        char absolute_path[PATH_MAX];
+        if (realpath(fpath, absolute_path) != NULL) {
+            printf("\nSearch Successfull : The file path is %s\n: ", absolute_path);
+        } else {
+            perror("realpath");
+        }
+
+    
+     // If target directory is specified and cp option is chosen
+    if(targetdirectory != NULL && strcmp(options,"-cp")==0){
+
+        // Check if the target directory exists
+        if (access(targetdirectory, F_OK) == -1){
+
+            printf("  Invalid storage directory\n");
+            exit(EXIT_FAILURE);
+        }
+        else{
+            // Copy the file to the target directory
+        int status = copy_file(absolute_path);
+            if(status == 1){
+
+            printf("\nCopied Successfully\n");
+            return 1;
+            }
+
+            else{
+                printf("\nCopied Unsucessfull\n");
+                exit(EXIT_FAILURE);
+
+                }
+            }   
+        }
+    // If target directory is specified and mv option is chosen
+    else if(targetdirectory != NULL && strcmp(options,"-mv")==0){
+
+        // Check if the target directory exists
+        if (access(targetdirectory, F_OK) == -1){
+
+        printf("  Invalid storage directory\n");
+        exit(EXIT_FAILURE);
+    }
+
+        else{
+            int status = move_file(absolute_path);
+                if (status == 1){
+                return 1;
+                }
+
+            }
+
+        }
+
+    }
+
+
+
+}
+
+else{
+
+// If both target directory and file extension are specified
+if(targetdirectory != NULL && extension != NULL ){
+
+// Get the absolute path of the file
+char absolute_path[PATH_MAX];
+
+        if (realpath(fpath, absolute_path) != NULL) {
+
+        } else {
+            perror("realpath");
+        }
+         // If the file has the specified extension
+        if (strstr(absolute_path, extension) != NULL) {
+        // Check if the file has already been included
+            if (!file_exist(absolute_path)) {
+                // if not 
+            // Add the file to the list of files to be included in the tar
+            files[files_count++] = strdup(absolute_path);
+        }
+    }
+    return 0;
+
+}
+
+
+
+ 
+
+
+}
+
+
+
+filename="";
+return 0;
+}
+
+
+int main(int argc, char *argv[]){
+
+const char *home_dir = getenv("HOME");
+
+if (home_dir == NULL) {
+        fprintf(stderr, "Unable to retrieve home directory\n");
+        return EXIT_FAILURE;
+}
+
+    // Change the current working directory to the home directory
+if (chdir(home_dir) != 0) {
+        perror("chdir");
+        return EXIT_FAILURE;
+}
+
+
+
+
+// if argmts is equal to 5 
+//for -cp and -mv
+if(argc == 5){
+//file that need to be moved
+filetosearch=argv[4];
+//storage_dir where it will be stored
+targetdirectory=argv[2];
+
+//option cp or mv
+options = argv[3];
+
+if(nftw(argv[1],find_file,20,FTW_PHYS)==-1){
+
+printf("\nInvalid Root Directory\n");
+exit(EXIT_FAILURE);
+
+
+
+}
+
+if(counter ==0){
+    printf("\nSearch Unsuccessfull\n");
+}
+}
+
+
+// just to serach for a file in a particular folder
+else if(argc == 3){
+
+
+
+filetosearch = argv[2];
+if(nftw(argv[1],find_file,20,FTW_PHYS)==-1){
+
+printf("\nInvalid Root Directory\n");
+exit(EXIT_FAILURE);
+
+
+}
+if(counter ==0){
+    printf("\nSearch Unsuccessfull\n");
+}
+
+
+
+}
+
+
+//to create .tar file
+else if(argc == 4){
+
+targetdirectory = argv[2];
+
+//check if strage dir exist : F_OK checks for the existense of the directory
+if (access(targetdirectory, F_OK) == -1) {
+        //create directory if doesnt exist
+        if(mkdir(targetdirectory, 0777)!=0){
+            perror("mkdir");
+            exit(EXIT_FAILURE);
+
+        };
+
+    }
+
+
+//file extension
+extension = argv[3];
+
+//files will have the all the path with specified extension
+files = malloc(sizeof(char *) * MAX_FILES);
+    if (files == NULL) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+
+
+//calling the nftw callback function
+if(nftw(argv[1],find_file,20,FTW_PHYS)==-1){
+
+printf("\nInvalid Root Directory\n");
+exit(EXIT_FAILURE);
+ 
+
+}
+
+
+if (files_count == 0) {
+        printf("No files found with extension %s\n", extension);
+        exit(EXIT_SUCCESS);
+    }
+
+    addtotar();
+
+    
+
+    // Free allocated memory
+    for (int i = 0; i < files_count; ++i) {
+        free(files[i]);
+    }
+    free(files);
+
+    return 0;
+
+}
+
+else{
+printf("Please pass valid arguments");
+
+
+}
+
+
+
+
+
+}
